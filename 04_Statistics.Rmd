@@ -1,0 +1,247 @@
+---
+title: "04_Statistics"
+output: html_document
+date: "2026-10-07"
+---
+
+```{r}
+install.packages(c(
+  "tidyverse",
+  "corrplot",
+  "MASS",
+  "car",
+  "MuMIn",
+  "DHARMa",
+  "glmmTMB",
+  "randomForest",
+  "vip",
+  "performance",
+  "ggeffects"
+))
+
+## Load libraries##
+library(tidyverse)
+library(corrplot)
+library(MASS)
+library(car)
+library(MuMIn)
+library(DHARMa)
+library(glmmTMB)
+library(randomForest)
+library(vip)
+library(dplyr)
+library(ggeffects)
+
+
+```
+
+Weather Statistics
+```{r}
+stats <- full_data %>%
+  filter(!is.na(Distance)) %>%
+  unique() %>%            
+  filter(LCM_Filter == "LCM")
+summary(stats)
+
+
+### Clean + prepare dataset ###
+stats2 <- stats %>%
+  dplyr::filter(!is.na(Distance), !is.na(Counts)) %>%
+  dplyr::mutate(
+    Site = as.factor(Site),
+    Date = as.factor(RealDate),
+    Funnel = as.factor(Funnel),
+    Funnel_Stand = as.factor(Funnel_Stand),
+    
+    # wind direction as circular variable
+    WindDir_sin = sin(Wind_Direction_avg * pi / 180),
+    WindDir_cos = cos(Wind_Direction_avg * pi / 180)
+  )
+summary(stats2)
+```
+
+```{r}
+### Fix wind direction ###
+
+LCM_model_data <- stats2 %>%
+  dplyr::select(
+    Counts, Distance, Site, RealDate, Funnel_Stand,
+    Rain_max_sum, Temperature_avg, RH_avg, LWI_avg,
+    Wind_Speed_avg, WindDir_sin, WindDir_cos
+  ) %>%
+  tidyr::drop_na()
+
+### Model1 environmental factors ###
+model <- glmmTMB(
+  Counts ~ Distance * Site +
+    Rain_max_sum +
+    Temperature_avg +
+    RH_avg +
+    LWI_avg +
+    (1 | RealDate) +
+    (1 | Funnel_Stand),
+  family = nbinom2,
+  data = LCM_model_data)
+
+summary(model)
+
+```
+
+```{r}
+### Model with Distance as fixed effect ###
+model_env <- glmmTMB(
+  Counts ~
+    Rain_max_sum +
+    Temperature_avg +
+    RH_avg +
+    LWI_avg +
+    (1 | Distance) +
+    (1| Site) +
+    (1 | RealDate),
+  
+  family = nbinom2,
+  data = LCM_model_data
+)
+
+summary(model_env)
+Anova(model_env)
+
+```
+
+```{r}
+### Site 1 only ###
+PSU_data <- LCM_model_data %>%
+  filter(Site == "PSU")
+
+model_PSU <- glmmTMB(
+  Counts ~ Rain_max_sum +
+    Temperature_avg +
+    RH_avg +
+    LWI_avg +
+    (1 | RealDate) +
+    (1 | Distance),
+  
+  family = nbinom2,
+  data = PSU_data
+)
+
+summary(model_PSU)
+Anova(model_PSU)
+
+```
+
+
+```{r}
+##Site 2 only###
+WS_data <- LCM_model_data %>%
+  filter(Site == "WS")
+
+model_WS <- glmmTMB(
+  Counts ~ Rain_max_sum +
+    Temperature_avg +
+    RH_avg +
+    LWI_avg +
+    (1 | RealDate)+
+    (1 | Distance),
+  
+  family = nbinom2,
+  data = WS_data
+)
+
+summary(model_WS)
+Anova(model_WS)
+
+```
+
+```{r}
+###Zero inflation test##
+
+#Environmenatl model
+
+
+m_env <- glmmTMB(
+  Counts ~
+    RH_z +
+    Temp_z +
+    Rain_z +
+    LWI_z +
+    Wind_z +
+    WindDir_sin +
+    WindDir_cos +
+    Site +
+    (1 | Site:Distance) +
+    (1 | RealDate),
+  
+  family = nbinom2,
+  data = LCM_summary
+)
+summary(m_env)
+Anova(m_env)
+
+summary(LCM_summary)
+
+sim <- simulateResiduals(m_env)
+plot(sim)
+testDispersion(sim)
+testZeroInflation(sim)
+
+performance::check_collinearity(m_env)
+
+```
+
+```{r}
+### Model diagnostics ###
+
+##Site 1###
+sim_PSU <- simulateResiduals(PSU_env)
+
+plot(sim_PSU)
+
+testDispersion(sim_PSU)
+
+testZeroInflation(sim_PSU)
+
+#Model diagnostics PSU
+
+##Site 2###
+sim_WS <- simulateResiduals(WS_env)
+
+plot(sim_WS)
+
+testDispersion(sim_WS)
+
+testZeroInflation(sim_WS)
+
+```
+
+
+Random Forest Analysis
+```{r}
+stats <- full_data %>% na.omit() %>% filter(LCM_Filter == "LCM") %>% 
+  dplyr::select(-c(WeatherDate, Funnel, Funnel_Stand, Original_Names, Nematode_Groups, Nem_Totals,
+    Funnel, Nematode_Groups, Nem_Totals, Original_Names, WeatherDate, Funnel_Stand))
+
+
+rf <- randomForest(Counts ~., data = stats, ntree = 500, mtry = 3, importance = T)
+  rf
+  
+  varImpPlot(rf)
+  importance(rf) 
+  arrange(vip)
+```
+
+```{r}
+ggplot(vip, aes(x = reorder(data.Variable, data.Importance), y = data.Importance)) +
+  geom_col(fill = "grey", width = 0.06) +
+  geom_point(color = "orange", size = 4) +
+  coord_flip() +
+  scale_x_discrete(labels = c("RH_avg" = "Rel. Humidity Avg", "Rain_max_sum" = "Precipitation",
+                              "RealDate" = "Collection Date","Wind_Direction_avg" = "Wind Direction Avg",
+                              "Wind_Speed_avg" = "Wind Speed Avg","RH_max" = "Rel. Humidity Max",
+                              "Wind_Direction_max" = "Wind Direction Max","Temperature_avg" = "Temperature Avg",
+                              "Temperature_max" = "Temperature Max")) +
+  theme + theme(axis.text.x = "element_text"(angle = 0, hjust =1), legend.position = "none") +
+  labs(title = "Variable Importance", x= "", y = "Mean Decrease Accuracy (%)")
+  
+```
+
