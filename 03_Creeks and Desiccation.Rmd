@@ -1,0 +1,72 @@
+---
+title: "03_Creeks and Desiccation"
+output: html_document
+date: "2026-10-07"
+---
+
+```{r}
+#data initalization
+
+creek <- read_excel("WS and PSU Nem Counts.xlsx", sheet = "PSU Creek 2025", range = cell_cols("A:G")) %>% mutate(Date = as.Date(Date)) %>%
+pivot_longer(cols = c(`Active LCM`, `Inactive LCM`, `Free Living`, `Apelenchoides`,`Other Nem`), 
+             names_to = "Original_Names", values_to = "Counts") %>%       #transform to long
+  mutate(LCM_Filter = if_else(str_detect(Original_Names, "LCM"), true = "LCM", "Other Nematodes")) %>%   #create only two categories - LCM & Other
+  mutate(Nematode_Groups = Original_Names) %>% 
+  mutate(Nematode_Groups = str_replace_all(Nematode_Groups, c("Active LCM" = "LCM", "Inactive LCM" = "LCM", "BI LCM" = "LCM",
+                                                              "Other BI" = "Other Nem", " BI" = "", "BI Aphelen." = "Apelenchoides"))) %>% 
+  mutate(Sieve = str_replace_all(Sieve, c("Bottom" = "400m", "Mid" = "200m", "Top" = "0m"))) %>% 
+  mutate(LCM_Filter, LCM_Filter = case_when(
+    LCM_Filter == "LCM" ~ 'bolditalic("L. crenatae")',
+    LCM_Filter == "Other Nematodes" ~ 'bold(Other~Nematodes)',   # Tilde creates a space when parsed
+    TRUE ~ LCM_Filter))
+
+```
+
+```{r}
+ggplot(creek, aes(x = Date, y = Counts, fill = Sieve)) +
+    geom_col(width = 4) +
+    geom_text(aes(label = ifelse(after_stat(y) == 0, "", after_stat(y)), group = Date), stat = "summary", fun = sum, vjust = -0.5) +
+    facet_wrap(~fct_rev(LCM_Filter), labeller = label_parsed) +
+    scale_x_date(breaks = seq(as.Date("2025-09-05"), as.Date("2025-11-21"), by = "7 days"),
+                 date_labels = "%b-%d", expand = -1.015)  +
+    scale_y_continuous(expand = expansion(mult = c(0.0, 0.1))) +
+    theme + theme(legend.position = "inside", legend.position.inside = c(0.9555, 0.896), legend.background = element_rect(color = "black", linetype = "solid")) +
+    scale_fill_manual(values = pal) +
+    annotate("text", x = as.Date("2025-11-20"), y = 6.3, label = "*", size = 4) +
+    labs(title = "Nematode Dispersal via Creeks", x = "Collection Date", y = "Nematode Counts", fill = "Sieve Location", caption = "* = Inactive Lc") +
+    theme(axis.title.x = element_text(margin = margin(t = 10)),     plot.caption = element_text(margin = margin(t = -5)))
+  
+```
+
+
+
+Desiccation 
+
+```{r}
+des <- read_xlsx("WS and PSU Nem Counts.xlsx", sheet = "Dessication Exp") 
+
+desc <- des %>% mutate("Active" = Active  / Total, "Inactive" = Inactive / Total) %>% 
+  mutate(`Time (in hours)` = as.factor(`Time (in hours)`)) %>% 
+  pivot_longer(cols = c("Active", "Inactive"), names_to = "LCM", values_to = "Counts")
+  
+desc <- desc %>% group_by(`Time (in hours)`, LCM) %>% summarise(counts_mean = mean(Counts), counts_se = sd(Counts) / sqrt(n()), , .groups = "drop") %>% 
+  mutate(counts_mean = round(counts_mean, digits = 3) * 100) %>% mutate(counts_se = counts_se * 100)
+
+```
+
+```{r}
+ggplot(desc %>% filter(LCM == "Active"), aes(`Time (in hours)`, counts_mean, color = LCM, group = LCM)) +
+  geom_line(position = position_dodge(width = 0.2), linewidth = 0.9) +
+  geom_pointrange(aes(ymin = counts_mean - counts_se, ymax = counts_mean + counts_se), 
+                  position = position_dodge(width = 0.2), size = 0.7, linewidth = 0.6) +
+  scale_y_continuous(labels = scales::label_percent(scale = 1)) +
+  scale_color_manual(values = c("#E09515","#BC204B22")) +
+  theme + theme(legend.position = "none") +
+  #theme(legend.position = "inside", legend.position.inside = c(0.95, 0.917), legend.background = element_rect(color = "black", linetype = "solid")) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5)) +
+  labs(title = expression(bolditalic("L. crenatae") ~ bold("Desiccation Tolerance")), x = "Desiccation Time (Hours)",
+       y = expression("Percentage of Active " ~ italic("L. crenatae")), color = "L. crenatae") 
+
+
+```
+
