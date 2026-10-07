@@ -1,0 +1,147 @@
+---
+title: "01_Data_Initalization"
+output: html_notebook
+date: "2026-10-07"
+---
+
+```{r}
+#load data------------------------
+ws24 <- read_excel("WS and PSU Nem Counts.xlsx", sheet = "WS Counts 2024", range = cell_cols("A:L")) %>% 
+  mutate(Nem_Totals = rowSums(across(4:12)), Year = 2024, Site = "WS") %>% mutate(Date = as.Date(Date))
+
+ws25 <- read_excel("WS and PSU Nem Counts.xlsx", sheet = "WS Counts 2025", range = cell_cols("A:L")) %>% 
+  mutate(Nem_Totals = rowSums(across(4:12)), Year = 2025, Site = "WS") %>% mutate(Date = as.character(Date))
+  #fix dates that were collected on the wrong day
+  ws25$Date <- str_replace_all(ws25$Date, c("2025-10-05" = "2025-10-06"))
+
+
+psu24 <- read_excel("WS and PSU Nem Counts.xlsx", sheet = "PSU Site 2024", range = cell_cols("A:L")) %>% 
+  mutate(Nem_Totals = rowSums(across(4:12)), Year = 2024, Site = "PSU") %>% mutate(Date=as.character(Date))
+
+psu25 <- read_excel("WS and PSU Nem Counts.xlsx", sheet = "PSU Site 2025", range = cell_cols("A:L")) %>% 
+  mutate(Nem_Totals = rowSums(across(4:12)), Year = 2025, Site = "PSU") %>% mutate(Date=as.character(Date))
+  #fix dates that were collected on the wrong day
+  psu25$Date <- str_replace_all(psu25$Date, c("2025-05-29" = "2025-05-30", "2025-09-18" = "2025-09-19", "2025-11-08" = "2025-11-07"))
+
+
+#bind datasets together  
+ws_site <- rbind(ws24, ws25) %>% mutate(Distance = case_when(
+    Year == "2024" ~ str_replace_all(Funnel_Stand, c("\\b1\\b" = "90m", "\\b2\\b" = "60m", "\\b3\\b" = "30m", "\\b4\\b" = "0m")),
+    Year == "2025" ~ str_replace_all(Funnel_Stand, c("\\b1\\b" = "150m", "\\b2\\b" = "120m", "\\b3\\b" = "90m", "\\b4\\b" = "60m", "\\b5\\b" = "30m", "\\b6\\b" = "0m")),
+      TRUE ~ as.character(Funnel_Stand))) %>% 
+    mutate(Distance = factor(Distance, levels = c("0m", "30m", "60m", "90m", "120m", "150m"))) %>% 
+    relocate(Distance, .after = Funnel_Stand) %>% mutate(Date = as.Date(Date))
+
+psu_site <- bind_rows(psu24, psu25) %>% 
+  mutate(Distance = str_replace_all(Funnel_Stand, c("\\b1\\b" = "3.48m", "\\b2\\b" = "2.2m", "\\b3\\b" = "3.5m", "\\b4\\b" = "11.74m", "3.5m.48m" = "3.48m"))) %>%  # everything else 
+  mutate(Distance = factor(Distance, levels = c("2.2m", "3.48m", "3.5m", "11.74m"))) %>% 
+  relocate(Distance, .after = Funnel_Stand) %>% mutate(Date = as.Date(Date))
+```
+
+
+
+
+```{r}
+#weather data
+weather_data <- read_xlsx("Hourly Weather Data.xlsx", sheet = "Hourly Weather Data") %>%   #shavers creek WS
+  separate(Date, into = c("Date", "Hour"), sep = " ") %>% mutate(Date = as.Date(Date))
+
+
+#change units
+weather_data <- weather_data %>% mutate(Wind_Speed = (Wind_Speed*1.609),    #kph
+                                Dewpoint = ((Dewpoint - 32) * (5/9)),           #C
+                                Rain = (Rain * 2.54),                           #cm
+                                Temperature = ((Temperature - 32) * (5/9)),     #C
+                                Date = as.Date(Date)) %>% 
+                       mutate(across(where(is.numeric), round, digits = 1))
+```
+
+
+```{r}
+#get rain data
+acc_3day_rain <- weather_data %>%  filter(Date >= "2024-08-12") %>%
+  group_by(Date) %>%
+  summarise(Rain_max = max(Rain)) %>% 
+  mutate(days_since = as.numeric(Date - as.Date("2024-08-12")),
+         Date = as.Date("2024-08-12") + (days_since %/% 3) * 3) %>% 
+  group_by(Date) %>% 
+  summarise(Rain_max_sum = sum(Rain_max))
+  
+  
+
+
+#for WS site
+avg_3day_weather <- weather_data %>%  filter(Date >= "2024-08-12") %>%
+  mutate(days_since = as.numeric(Date - as.Date("2024-08-12")),
+        Date = as.Date("2024-08-12") + (days_since %/% 3) * 3) %>%    
+  #days_since %/% 3 gives group numbers: 0,1,2→0; 3,4,5→1; etc.
+  #Multiply by 3 and add back to start date → exact 3-day boundaries from Aug 18
+  group_by(Date) %>%
+  summarise(across(c(Temperature, RH, Dewpoint, LWI, Wind_Speed, Wind_Direction),
+                   list(avg = mean, min = min, max = max), 
+                   .names = "{.col}_{.fn}"), .groups = "drop") 
+
+
+
+ws_site <- ws_site %>% mutate(Date = Date - 3)  %>% mutate(RealDate = Date + 3) 
+ws_nem_weather <- left_join(ws_site, acc_3day_rain, by = c("Date")) %>% 
+  left_join(avg_3day_weather, by = "Date") %>% rename(WeatherDate = Date) %>% relocate(RealDate, .before = WeatherDate)
+
+
+
+#PSU Site
+acc_7day_rain <- weather_data %>%
+  group_by(Date) %>%
+  summarise(Rain_max = max(Rain)) %>% 
+ mutate(
+    Date = case_when(
+      year(Date) == 2024 ~ floor_date(Date, unit = "week", week_start = 3),
+      year(Date) == 2025 ~ floor_date(Date, unit = "week", week_start = 5),
+      TRUE ~ Date )) %>% 
+  group_by(Date) %>% 
+  summarise(Rain_max_sum = sum(Rain_max))
+
+
+
+avg_weekly_weather <- weather_data %>%
+  mutate(
+    Date = case_when(
+      year(Date) == 2024 ~ floor_date(Date, unit = "week", week_start = 3),
+      year(Date) == 2025 ~ floor_date(Date, unit = "week", week_start = 5),
+      TRUE ~ Date ))  %>%  group_by(Date) %>%
+  summarise(across(c(Temperature, RH, Dewpoint, LWI, Wind_Speed, Wind_Direction),
+                   list(avg = mean, min = min, max = max), 
+                   .names = "{.col}_{.fn}"), .groups = "drop") 
+
+
+psu_site <- psu_site %>% mutate(Date = Date - 7)  %>% mutate(RealDate = Date + 7) 
+psu_nem_weather <- left_join(psu_site, acc_7day_rain, by = c("Date")) %>% 
+  left_join(avg_weekly_weather, by = "Date") %>% rename(WeatherDate = Date) %>% relocate(RealDate, .before = WeatherDate)
+
+
+```
+
+```{r}
+#combine data together
+full_data <- rbind(ws_nem_weather, psu_nem_weather) %>% 
+  pivot_longer(cols = c(`Active LCM`, `Inactive LCM`, `BI LCM`, `Free Living`, `Free Living BI`, `Apelenchoides`, `BI Aphelen.`, `Other Nem`, `Other BI`), names_to = "Original_Names", values_to = "Counts") %>%  #transform to long
+  mutate(LCM_Filter = if_else(str_detect(Original_Names, "LCM"), true = "LCM", "Other Nematodes")) %>%   #create only two categories - LCM & Other
+  mutate(Nematode_Groups = Original_Names) %>% 
+  mutate(Nematode_Groups = str_replace_all(Nematode_Groups, c("Active LCM" = "LCM", "Inactive LCM" = "LCM", "BI LCM" = "LCM",
+    "Other BI" = "Other Nem", " BI" = "", "BI Aphelen." = "Apelenchoides"))) %>% 
+  relocate(c(Original_Names, Nematode_Groups, LCM_Filter, Counts), .before = Nem_Totals)                      
+
+#filter out missing RealData Dates
+full_data <- full_data %>% filter(!(RealDate %in% (c("2024-09-26", "2024-06-05"))))    #Missing data from PSU 2024
+full_data[!complete.cases(full_data),]  #weather data is missing 10/18, 10/19, 10/20/2025
+
+
+#rename PSU and WS to Site 1 and Site 2
+full_data$Site <- str_replace_all(full_data$Site, "PSU", "Site 1")
+full_data$Site <- str_replace_all(full_data$Site, "WS", "Site 2")
+full_data$LCM_Filter <- str_replace_all(full_data$LCM_Filter, "L. crenatae", "LCM")
+
+rm(ws24, ws25, psu24, psu25, ws_site, psu_site, acc_3day_rain, acc_7day_rain, 
+   ws_nem_weather, psu_nem_weather, avg_3day_weather, avg_weekly_weather)
+
+```

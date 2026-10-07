@@ -1,0 +1,158 @@
+---
+title: "02_Weather_Plots"
+output: html_document
+date: "2026-10-07"
+---
+
+```{r}
+pal = c("#314D64","#E09515","#BC204B", "#519E8A", "#1e407c", "#96BEE6")
+
+theme <- theme_bw() + 
+  theme(panel.border = element_rect(fill = NA, colour = "black"),
+        strip.text.x = element_text(size = 12, color = "black", face = "bold"),
+        plot.title = element_text(face = "bold", size = 15),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+```{r}
+#distance from stands
+full_data %>% filter(!Distance %in% c(5, 6, 7, NA)) %>% 
+  mutate(Nematode_Groups = factor(Nematode_Groups), LCM_Filter = factor(LCM_Filter)) %>%
+  arrange(Site, Year, Distance, LCM_Filter, Nematode_Groups) %>%
+  group_by(Site, Year, Distance, LCM_Filter) %>% 
+  mutate(mid_y = cumsum(Counts) - Counts/2) %>% ungroup() %>%
+ggplot(aes(x = Distance, y = mid_y, group = LCM_Filter)) +
+  geom_tile(aes(fill = LCM_Filter, height = Counts), position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(aes(y = total, label = total),  
+            data = . %>% group_by(Site, Year, Distance, LCM_Filter) %>% 
+            summarise(total = sum(Counts), .groups = "drop"), position = position_dodge(width = 0.8), vjust = -0.5, size = 3) +
+  facet_nested(~ Site + Year, scales = "free_x", space = "free_x", solo_line = TRUE,
+               nest_line = element_line(colour = "black", linewidth = 1, lineend = "square"),
+               strip = strip_nested(background_x = elem_list_rect(fill = c("lightblue", "darksalmon", "azure3", "azure3", "#D6B6AB", "#D6B6AB")) )) + 
+  theme + theme(axis.text.x = element_text(angle = 0, hjust = 0.5),
+        legend.position = "inside", legend.position.inside = c(0.943, 0.92), legend.background = element_rect(color = "black", linetype = "solid")) +
+  scale_fill_manual(values = c("LCM" = "#314D64", "Other Nematodes" = "#E09515"),
+                    labels = c("LCM" = expression(italic("L. crenatae")), "Other Nematodes" = "Other Nematodes")) +
+  coord_cartesian(ylim = c(0, 1950)) +
+  scale_y_continuous(expand = expansion(mult = c(0.0, 0.2))) +
+  labs(title = "Nematode Distribution from an Infected Tree", 
+       x = "Distance from an Infected Tree", y = "Nematode Counts", fill = "Nematode Group")
+
+```
+
+
+```{r}
+#base plot with dates
+plot_template <- function(site_name) {
+  p <- full_data %>% filter(Site == site_name) %>%  filter(LCM_Filter == "LCM") %>% 
+    ggplot(., aes(RealDate, Counts, fill = LCM_Filter)) +
+    geom_col() +
+    facet_wrap(~Year, scales = "free_x", ncol = 1) +
+    scale_y_continuous(expand = expansion(mult = c(0.0, 0.2))) +
+    scale_fill_manual(values = pal) +
+    theme + theme(legend.position = "inside", legend.position.inside = c(0.06, 0.90)) + 
+    labs(x = "", y = "")
+  
+  # Conditional scales
+  if (site_name == "Site 2") {
+     p + theme(strip.background = element_rect(fill = "darksalmon", colour = "black")) +
+      facetted_pos_scales(x = list(
+      scale_x_date(breaks = seq(as.Date("2024-08-18"), as.Date("2024-11-19"), by = "3 days"),
+                   date_labels = "%b-%d", expand = -1.015),  # 2024
+      scale_x_date(breaks = seq(as.Date("2025-08-22"), as.Date("2025-11-17"), by = "3 days"),
+                   date_labels = "%b-%d", expand = -1.015)   # 2025 
+    ))
+  } else if (site_name == "Site 1") {
+     p + theme(strip.background = element_rect(fill = "lightblue", colour = "black")) + 
+      facetted_pos_scales(x = list(
+      scale_x_date(breaks = seq(as.Date("2024-05-08"), as.Date("2024-11-06"), by = "7 days"),
+                   date_labels = "%b-%d", expand = -1.015),  # 2024
+      scale_x_date(breaks = seq(as.Date("2025-05-09"), as.Date("2025-11-21"), by = "7 days"),
+                   date_labels = "%b-%d", expand = -1.015)   # 2025
+    ))
+  }
+}
+
+
+#total nematodes collected from each site
+a <- plot_template("Site 1") +  coord_cartesian(ylim = c(0,1900)) +
+  geom_text(aes(label = ifelse(after_stat(y) == 0, "", after_stat(y)), group  = RealDate), stat = "summary", fun  = sum, vjust = -0.5, size = 2.5) + 
+  labs(title = expression(bold("Site 1" ~ bolditalic("L. crenatae" ~ bold("Collection from Funnels")))), y = expression(italic("L. crenatae") ~ "Counts")) +
+  scale_y_continuous(expand = expansion(mult = c(0.0, 0.2))) 
+       
+
+b <- plot_template("Site 2") +    coord_cartesian(ylim = c(0,1900)) +
+  geom_text(aes(label = ifelse(after_stat(y) == 0, "", after_stat(y)), group  = RealDate), stat = "summary", fun  = sum, vjust = -0.5, size = 2.5) +
+  labs(title = expression(bold("Site 2" ~ bolditalic("L. crenatae" ~ bold("Collection from Funnels"))))) +
+  scale_y_continuous(expand = expansion(mult = c(0.0, 0.2))) 
+
+
+a + b + plot_annotation() & theme(legend.position = "none") 
+
+
+
+```
+
+
+
+```{r}
+plot_template("Site 1") +  #PSU
+  geom_smooth(aes(y = RH_avg * 20, color = "#BC204B66"), fill ="#BC204B66",  span = 0.1, linewidth = 0.75, linetype = "solid") +
+  stat_smooth(aes(y = Rain_max_sum*80, color = "lightblue"), fill= "lightblue", alpha = 0.5, geom  = "area", method = "loess", span = 0.17) +
+    #geom_area(aes(y = Rain_max_sum*100, color = "lightblue"), fill = "lightblue", alpha = 0.4, position = "identity", outline.type = "upper") +
+  #stat_summary(aes(label = Wind_Direction_avg, group = WeatherDate), color = "#314D64", geom = "text", fun = sum, vjust = -2, size =3) +
+  scale_color_manual(name = "Weather Data", values = c("#BC204B66", "lightblue"),
+                   labels = c("Relative Humidity (%)", "Total Rainfall (cm)")) +
+  scale_y_continuous(name = expression(italic("L. crenatae") ~ "Counts"), 
+                     sec.axis = sec_axis(trans=~.*0.05, name = "Relative Humidity (%)", labels = scales::label_percent(scale = 1))) +
+  coord_cartesian(ylim = c(95,2000)) +
+  theme(legend.position = "inside", legend.position.inside = c(0.9333, 0.921), legend.background = element_rect(color = "black", linetype = "solid")) +
+  scale_fill_manual(values = pal) + guides(fill = "none") + #removes fill legend
+  labs(title = "Site 1 Weather Data") 
+   stat_summary(aes(y = Rain_max_sum * 80, label = ifelse(after_stat(y) >= 50, after_stat(round(y / 80, 1)),""  ),   # This "undoes" the math for the text
+   group = RealDate, fill = NULL), fun = mean, 
+    geom = "label",             # Changed from "text" to "label"
+    fill = "white",             # Background color of the box
+    label.size = 0,             # Removes the border around the box for a cleaner look
+    label.padding = unit(0.1, "lines"), # Makes the box small/tight around the number
+    color = "#314D64",          # Text color
+    vjust = -0.8,               # Adjusted because labels take up more vertical space
+    size = 2.75,  show.legend = F ) 
+
+
+
+
+#weather
+plot_template("Site 2") +
+  geom_smooth(aes(y = RH_avg * 5.6, color = "#BC204B66"), fill ="#BC204B66",  span = 0.1, linewidth = 0.75, linetype = "solid") +
+  stat_smooth(aes(y = Rain_max_sum*65, color = "lightblue"), fill= "lightblue", alpha = 0.5, geom  = "area", method = "loess", span = 0.17) +
+  #geom_area(aes(y = Rain_max_sum*100, color = "lightblue"), fill = "lightblue", alpha = 0.4, position = "identity", outline.type = "upper") +
+  #stat_summary(aes(label = `Wind_Speed_avg`, group = WeatherDate), color = "#314D64", geom = "text", fun = sum, vjust = -2, size =3) +
+  scale_color_manual(name = "Weather Data", values = c("#BC204B66", "lightblue"),
+                     labels = c("Relative Humidity (%)", "Total Rainfall (cm)")) +
+  scale_y_continuous(name = expression(italic("L. crenatae") ~ "Counts"), 
+                     sec.axis = sec_axis(trans=~.*0.178, name = "Relative Humidity (%)", labels = scales::label_percent(scale = 1))) +
+  coord_cartesian(ylim = c(29,590)) +
+  theme(legend.position = "inside", legend.position.inside = c(0.9335, 0.921), legend.background = element_rect(color = "black", linetype = "solid")) +
+  scale_fill_manual(values = pal) + guides(fill = "none") + #removes fill legend
+  labs(title = "Site 2 Weather Data", x = "Collection Date", fill= "") 
+stat_summary(aes(y = Rain_max_sum * 65, label = ifelse(after_stat(y) >= 1, after_stat(round(y / 65, 1)),""  ),   # This "undoes" the math for the text
+                 group = RealDate, fill = NULL), fun = mean, 
+             geom = "label",             # Changed from "text" to "label"
+             fill = "white",             # Background color of the box
+             label.size = 0,             # Removes the border around the box for a cleaner look
+             label.padding = unit(0.1, "lines"), # Makes the box small/tight around the number
+             color = "#314D64",          # Text color
+             vjust = -0.8,               # Adjusted because labels take up more vertical space
+             size = 2.75,
+             show.legend = F) 
+  
+
+
+c/d
+
+```
