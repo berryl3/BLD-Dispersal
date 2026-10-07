@@ -4,6 +4,14 @@ output: html_notebook
 date: "2026-10-07"
 ---
 
+library(tidyverse)
+library(readxl)
+library(ggh4x)
+library(patchwork)
+library(randomForest)
+library(vip)
+
+
 ```{r}
 #load data------------------------
 ws24 <- read_excel("WS and PSU Nem Counts.xlsx", sheet = "WS Counts 2024", range = cell_cols("A:L")) %>% 
